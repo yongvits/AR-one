@@ -1,0 +1,10 @@
+{
+  "name": "WebAR Studio Pro",
+  "description": "WebGL Image Target WebAR Authoring Studio with live 3D viewport, target compiler, GLB models, video textures, sequence player, and AR preview.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
