@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { Camera, RefreshCw, X, AlertTriangle } from 'lucide-react';
 import { ARObjectData, MarkerData } from '../types/webar';
-import { ensureMindARLoaded, restoreMindARGlobals } from '../utils/compiler';
+import { ensureMindARLoaded, getMindARThreeClass } from '../utils/compiler';
 
 interface ARCameraModalProps {
   isOpen: boolean;
@@ -70,6 +70,20 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
       return;
     }
 
+    // 1.5 Explicitly request camera permission first
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
+      // We got permission, we can stop the stream immediately since MindAR will request its own
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err: any) {
+      console.error("Camera permission denied:", err);
+      setTrackingStatus('ไม่สามารถเข้าถึงกล้องได้ กรุณาอนุญาตสิทธิ์การใช้งานกล้อง');
+      setStatusColor('bg-red-500/20 text-red-300 border-red-500/30 font-bold');
+      setHasError(true);
+      return;
+    }
+
     // 2. Prepare target URL
     let targetSrc: string;
     let usingUserMarker = false;
@@ -86,13 +100,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
     try {
       await ensureMindARLoaded();
-      restoreMindARGlobals();
 
-      if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
+      const MindARThreeClass = getMindARThreeClass();
+      if (!MindARThreeClass) {
         throw new Error("MindAR Three library is not loaded");
       }
-
-      const MindARThreeClass = (window as any).MINDAR.IMAGE.MindARThree;
 
       let currentFacingMode = facingMode;
       let mindarThree: any = null;
@@ -197,10 +209,12 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
       try {
         await mindarThree.start();
       } catch (startErr) {
-        console.warn("Camera start failed with environment, retrying with user camera mode:", startErr);
+        console.warn("Camera start failed with environment, clearing container and retrying with user mode:", startErr);
         try {
-          mindarThree.stop();
+          if (mindarThree) mindarThree.stop();
         } catch (e) {}
+        container.innerHTML = '';
+
         mindarThree = createEngine('user');
         mindarThreeRef.current = mindarThree;
         await mindarThree.start();
@@ -220,6 +234,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           v.style.setProperty('left', '0', 'important');
           v.style.setProperty('z-index', '1', 'important');
           v.style.setProperty('display', 'block', 'important');
+          v.style.setProperty('opacity', '1', 'important');
           v.setAttribute('playsinline', '');
           v.setAttribute('webkit-playsinline', '');
           v.muted = true;
