@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { Camera, RefreshCw, X, AlertTriangle } from 'lucide-react';
 import { ARObjectData, MarkerData } from '../types/webar';
-import { ensureMindARLoaded } from '../utils/compiler';
+import { ensureMindARLoaded, restoreMindARGlobals } from '../utils/compiler';
 
 interface ARCameraModalProps {
   isOpen: boolean;
@@ -86,6 +86,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
     try {
       await ensureMindARLoaded();
+      restoreMindARGlobals();
 
       if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
         throw new Error("MindAR Three library is not loaded");
@@ -93,21 +94,33 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
       const MindARThreeClass = (window as any).MINDAR.IMAGE.MindARThree;
 
-      const mindarThree = new MindARThreeClass({
-        container: container,
-        imageTargetSrc: targetSrc,
-        facingMode: facingMode,
-        uiLoading: "no",
-        uiScanning: "no",
-        filterMinCF: 0.001,
-        filterBeta: 0.01
-      });
+      let currentFacingMode = facingMode;
+      let mindarThree: any = null;
+
+      const createEngine = (mode: string) => {
+        return new MindARThreeClass({
+          container: container,
+          imageTargetSrc: targetSrc,
+          facingMode: mode,
+          uiLoading: "no",
+          uiScanning: "no",
+          filterMinCF: 0.001,
+          filterBeta: 0.01
+        });
+      };
+
+      try {
+        mindarThree = createEngine(currentFacingMode);
+      } catch (err) {
+        console.warn(`Failed to create MindAR engine with ${currentFacingMode}, trying user facing mode:`, err);
+        currentFacingMode = 'user';
+        mindarThree = createEngine(currentFacingMode);
+      }
 
       mindarThreeRef.current = mindarThree;
 
       const { renderer, scene, camera } = mindarThree;
 
-      // Ensure transparent background on renderer so live camera stream is visible behind WebGL canvas
       if (renderer) {
         renderer.setClearColor(0x000000, 0);
       }
@@ -180,14 +193,24 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         videos.forEach((v) => v.pause());
       };
 
-      // Start engine
-      await mindarThree.start();
+      // Start engine with fallback retry if facingMode fails
+      try {
+        await mindarThree.start();
+      } catch (startErr) {
+        console.warn("Camera start failed with environment, retrying with user camera mode:", startErr);
+        try {
+          mindarThree.stop();
+        } catch (e) {}
+        mindarThree = createEngine('user');
+        mindarThreeRef.current = mindarThree;
+        await mindarThree.start();
+      }
 
-      // CSS full bleed styling fix & ensure video stream plays
-      requestAnimationFrame(() => {
+      // Interval to enforce video playback & full container layout
+      const enforceVideoStyles = () => {
         const v = container.querySelector('video') as HTMLVideoElement | null;
         const c = container.querySelector('canvas') as HTMLCanvasElement | null;
-        
+
         if (v) {
           v.style.setProperty('width', '100%', 'important');
           v.style.setProperty('height', '100%', 'important');
@@ -196,10 +219,13 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           v.style.setProperty('top', '0', 'important');
           v.style.setProperty('left', '0', 'important');
           v.style.setProperty('z-index', '1', 'important');
+          v.style.setProperty('display', 'block', 'important');
           v.setAttribute('playsinline', '');
           v.setAttribute('webkit-playsinline', '');
           v.muted = true;
-          v.play().catch((err) => console.log('Camera video play warning:', err));
+          if (v.paused) {
+            v.play().catch((e) => console.log('Video play catch:', e));
+          }
         }
 
         if (c) {
@@ -211,7 +237,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           c.style.setProperty('z-index', '2', 'important');
           c.style.setProperty('pointer-events', 'none', 'important');
         }
-      });
+      };
+
+      enforceVideoStyles();
+      const layoutInterval = setInterval(enforceVideoStyles, 400);
+      (container as any)._layoutInterval = layoutInterval;
 
       if (usingUserMarker) {
         setTrackingStatus('ส่องกล้องไปที่รูป Target ของคุณ...');
@@ -243,6 +273,12 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
   };
 
   const stopARSession = () => {
+    const containerEl = containerRef.current;
+    if (containerEl && (containerEl as any)._layoutInterval) {
+      clearInterval((containerEl as any)._layoutInterval);
+      (containerEl as any)._layoutInterval = null;
+    }
+
     if (mindarThreeRef.current) {
       try {
         mindarThreeRef.current.stop();
@@ -256,8 +292,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
     activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     activeBlobUrlsRef.current = [];
 
-    const container = containerRef.current;
-    if (container) container.innerHTML = '';
+    if (containerEl) containerEl.innerHTML = '';
   };
 
   if (!isOpen) return null;

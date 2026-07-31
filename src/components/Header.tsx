@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
           <h1 className="text-xs md:text-sm font-bold tracking-wide text-slate-100 flex items-center gap-1.5">
             WebAR Studio Pro
             <span className="text-[9px] md:text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-bold">
-              v5.5.1 WebGL
+              v5.5.2 Pro Fix
             </span>
           </h1>
           <p className="text-[10px] text-slate-400 hidden md:block">
