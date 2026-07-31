@@ -107,6 +107,12 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
       const { renderer, scene, camera } = mindarThree;
 
+      // Ensure transparent background on renderer so live camera stream is visible behind WebGL canvas
+      if (renderer) {
+        renderer.setClearColor(0x000000, 0);
+      }
+      scene.background = null;
+
       // Lights
       const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
       scene.add(ambientLight);
@@ -177,18 +183,34 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
       // Start engine
       await mindarThree.start();
 
-      // CSS full bleed styling fix
+      // CSS full bleed styling fix & ensure video stream plays
       requestAnimationFrame(() => {
-        const v = container.querySelector('video');
-        const c = container.querySelector('canvas');
-        [v, c].forEach((el) => {
-          if (!el) return;
-          el.style.setProperty('width', '100%', 'important');
-          el.style.setProperty('height', '100%', 'important');
-          el.style.setProperty('position', 'absolute', 'important');
-          el.style.setProperty('top', '0', 'important');
-          el.style.setProperty('left', '0', 'important');
-        });
+        const v = container.querySelector('video') as HTMLVideoElement | null;
+        const c = container.querySelector('canvas') as HTMLCanvasElement | null;
+        
+        if (v) {
+          v.style.setProperty('width', '100%', 'important');
+          v.style.setProperty('height', '100%', 'important');
+          v.style.setProperty('object-fit', 'cover', 'important');
+          v.style.setProperty('position', 'absolute', 'important');
+          v.style.setProperty('top', '0', 'important');
+          v.style.setProperty('left', '0', 'important');
+          v.style.setProperty('z-index', '1', 'important');
+          v.setAttribute('playsinline', '');
+          v.setAttribute('webkit-playsinline', '');
+          v.muted = true;
+          v.play().catch((err) => console.log('Camera video play warning:', err));
+        }
+
+        if (c) {
+          c.style.setProperty('width', '100%', 'important');
+          c.style.setProperty('height', '100%', 'important');
+          c.style.setProperty('position', 'absolute', 'important');
+          c.style.setProperty('top', '0', 'important');
+          c.style.setProperty('left', '0', 'important');
+          c.style.setProperty('z-index', '2', 'important');
+          c.style.setProperty('pointer-events', 'none', 'important');
+        }
       });
 
       if (usingUserMarker) {

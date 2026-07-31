@@ -13,19 +13,27 @@ export async function ensureMindARLoaded(): Promise<void> {
     return;
   }
 
-  const loadScript = (src: string, checkGlobal?: () => boolean) => {
+  const loadScript = (src: string, checkGlobal: () => boolean) => {
     return new Promise<void>((resolve, reject) => {
+      if (checkGlobal()) {
+        resolve();
+        return;
+      }
+
       const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
       if (existing) {
         let attempts = 0;
         const checkInterval = setInterval(() => {
           attempts++;
-          if ((checkGlobal && checkGlobal()) || attempts > 50) {
+          if (checkGlobal()) {
             clearInterval(checkInterval);
-            if (checkGlobal && !checkGlobal()) {
-              reject(new Error(`Timeout waiting for script: ${src}`));
-            } else {
+            resolve();
+          } else if (attempts > 60) {
+            clearInterval(checkInterval);
+            if ((window as any).MINDAR?.IMAGE) {
               resolve();
+            } else {
+              reject(new Error(`Timeout waiting for MindAR script load: ${src}`));
             }
           }
         }, 100);
@@ -39,24 +47,35 @@ export async function ensureMindARLoaded(): Promise<void> {
         let attempts = 0;
         const checkInterval = setInterval(() => {
           attempts++;
-          if (!checkGlobal || checkGlobal() || attempts > 30) {
+          if (checkGlobal() || attempts > 30) {
             clearInterval(checkInterval);
             resolve();
           }
         }, 100);
       };
-      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
       document.head.appendChild(script);
     });
   };
 
   try {
+    // 1. Ensure THREE is attached to window
+    if (!(window as any).THREE) {
+      await loadScript(
+        'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+        () => !!(window as any).THREE
+      );
+    }
+
+    // 2. Load MindAR Compiler
     if (!(window as any).MINDAR?.IMAGE?.Compiler) {
       await loadScript(
         'https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image.prod.js',
         () => !!(window as any).MINDAR?.IMAGE?.Compiler
       );
     }
+
+    // 3. Load MindAR Three Engine
     if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
       await loadScript(
         'https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-three.prod.js',
@@ -64,7 +83,7 @@ export async function ensureMindARLoaded(): Promise<void> {
       );
     }
   } catch (err) {
-    console.error("Error dynamically loading MindAR scripts:", err);
+    console.error("Error loading MindAR scripts:", err);
     throw err;
   }
 }
