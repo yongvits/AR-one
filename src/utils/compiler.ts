@@ -1,31 +1,20 @@
 import * as THREE from 'three';
-
-// Cache the imported modules
-let mindarCompilerModule: any = null;
-let mindarThreeModule: any = null;
+// @ts-ignore
+import { Compiler } from 'mind-ar/dist/mindar-image.prod.js';
+// @ts-ignore
+import { MindARThree } from 'mind-ar/dist/mindar-image-three.prod.js';
 
 export async function ensureMindARLoaded(): Promise<void> {
-  if (mindarCompilerModule && mindarThreeModule) return;
-
-  try {
-    console.log("Loading MindAR ES modules via dynamic import...");
-    // @ts-ignore
-    mindarCompilerModule = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image.prod.js');
-    // @ts-ignore
-    mindarThreeModule = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-three.prod.js');
-    console.log("MindAR ES modules loaded:", !!mindarCompilerModule, !!mindarThreeModule);
-  } catch (err) {
-    console.error("Error dynamically loading MindAR modules:", err);
-    throw new Error("Failed to load MindAR. Please check your internet connection and import map.");
-  }
+  // Already imported via ES modules from the local package
+  return Promise.resolve();
 }
 
 export function getMindARCompilerClass() {
-  return mindarCompilerModule?.Compiler;
+  return Compiler;
 }
 
 export function getMindARThreeClass() {
-  return mindarThreeModule?.MindARThree;
+  return MindARThree;
 }
 
 export async function getOptimizedImageElement(img: HTMLImageElement): Promise<HTMLImageElement> {
@@ -86,8 +75,12 @@ export async function compileMarkerTarget(
     if (onProgress) onProgress(p);
   });
 
-  const buffer: any = await compiler.exportData();
+  const exported: any = await compiler.exportData();
   if (onProgress) onProgress(100);
 
-  return buffer?.buffer ? buffer.buffer : buffer;
+  // Correctly extract exact byte slice from Uint8Array to avoid extra trailing buffer pool bytes
+  const uint8 = exported instanceof Uint8Array ? exported : new Uint8Array(exported);
+  const exactArrayBuffer = uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength);
+
+  return exactArrayBuffer;
 }

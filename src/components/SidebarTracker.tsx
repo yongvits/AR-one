@@ -54,15 +54,15 @@ export const SidebarTracker: React.FC<SidebarTrackerProps> = ({
         <input
           type="file"
           ref={fileInputRef}
-          accept="image/png, image/jpeg"
+          accept="image/png, image/jpeg, .mind"
           className="hidden"
           onChange={handleFileChange}
         />
         <Upload className="w-6 h-6 mx-auto text-slate-500 group-hover:text-indigo-400 mb-1.5 transition" />
         <p className="text-xs text-slate-300 font-medium">
-          Drag & Drop หรือคลิกเลือกรูป AR Target
+          คลิกเลือกรูปภาพ หรือไฟล์ Target (.mind)
         </p>
-        <p className="text-[10px] text-slate-500 mt-0.5">รองรับไฟล์ JPG, PNG</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">รองรับไฟล์ JPG, PNG และไฟล์ .mind (จาก MindAR Compiler Tool)</p>
       </div>
 
       {/* Compiler Progress Box */}

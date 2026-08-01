@@ -4,6 +4,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import { Camera, RefreshCw, X, AlertTriangle } from 'lucide-react';
 import { ARObjectData, MarkerData } from '../types/webar';
 import { ensureMindARLoaded, getMindARThreeClass } from '../utils/compiler';
+import { createChromaKeyMaterial } from '../utils/chromaKeyShader';
 
 interface ARCameraModalProps {
   isOpen: boolean;
@@ -106,173 +107,322 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         throw new Error("MindAR Three library is not loaded");
       }
 
-      let currentFacingMode = facingMode;
       let mindarThree: any = null;
 
-      const createEngine = (mode: string) => {
-        return new MindARThreeClass({
+      const initAndStartEngine = async (mode: string) => {
+        container.innerHTML = '';
+        const engine = new MindARThreeClass({
           container: container,
           imageTargetSrc: targetSrc,
           facingMode: mode,
           uiLoading: "no",
           uiScanning: "no",
-          filterMinCF: 0.001,
-          filterBeta: 0.01
+          filterMinCF: 0.0001,
+          filterBeta: 0.001,
+          warmupTolerance: 5,
+          missTolerance: 15
         });
+
+        const { renderer, scene, camera } = engine;
+        if (renderer) {
+          renderer.setClearColor(0x000000, 0);
+        }
+        scene.background = null;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight.position.set(1, 2, 2);
+        scene.add(dirLight);
+
+        // Anchor
+        const anchor = engine.addAnchor(0);
+        const mixers: THREE.AnimationMixer[] = [];
+        const videos: HTMLVideoElement[] = [];
+
+        // Smooth Group container attached to Scene for rock-solid stability without jittering
+        const smoothGroup = new THREE.Group();
+        smoothGroup.visible = false;
+        scene.add(smoothGroup);
+
+        // Studio Group container inside smoothGroup
+        // Aligns Studio Viewport coordinates (X=Width, Y=Up from target plane, Z=Height down target)
+        // with MindAR Anchor coordinates (X=Width, Y=Up target image, Z=Outward from target face).
+        const studioGroup = new THREE.Group();
+        smoothGroup.add(studioGroup);
+
+        studioGroup.rotation.x = Math.PI / 2;
+
+        const targetWidthMeters = (markerData?.widthCm || 15) / 100;
+        const scaleFactor = 1 / targetWidthMeters;
+        studioGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+        // Attach 3D objects to Studio group
+        objects.forEach((obj) => {
+          if (!obj.visible) return;
+
+          let cloneObj: THREE.Object3D | null = null;
+
+          if (obj.type === 'cube') {
+            const geom = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+            const mat = new THREE.MeshStandardMaterial({
+              color: obj.colorHex || '#6366f1',
+              transparent: (obj.opacity ?? 1) < 1,
+              opacity: obj.opacity ?? 1
+            });
+            cloneObj = new THREE.Mesh(geom, mat);
+          } else if (obj.type === 'sphere') {
+            const geom = new THREE.SphereGeometry(0.05, 32, 32);
+            const mat = new THREE.MeshStandardMaterial({
+              color: obj.colorHex || '#6366f1',
+              transparent: (obj.opacity ?? 1) < 1,
+              opacity: obj.opacity ?? 1
+            });
+            cloneObj = new THREE.Mesh(geom, mat);
+          } else if (obj.type === 'cylinder') {
+            const geom = new THREE.CylinderGeometry(0.04, 0.04, 0.1, 32);
+            const mat = new THREE.MeshStandardMaterial({
+              color: obj.colorHex || '#6366f1',
+              transparent: (obj.opacity ?? 1) < 1,
+              opacity: obj.opacity ?? 1
+            });
+            cloneObj = new THREE.Mesh(geom, mat);
+          } else if (obj.type === 'plane') {
+            const geom = new THREE.PlaneGeometry(0.1, 0.1);
+            const mat = new THREE.MeshStandardMaterial({
+              color: obj.colorHex || '#6366f1',
+              side: THREE.DoubleSide,
+              transparent: (obj.opacity ?? 1) < 1,
+              opacity: obj.opacity ?? 1
+            });
+            cloneObj = new THREE.Mesh(geom, mat);
+          } else if (obj.type === 'capsule') {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({
+              color: obj.colorHex || '#6366f1',
+              transparent: (obj.opacity ?? 1) < 1,
+              opacity: obj.opacity ?? 1
+            });
+            const cyl = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.03, 0.03, 0.08, 32),
+              mat
+            );
+            const topSp = new THREE.Mesh(
+              new THREE.SphereGeometry(0.03, 16, 16),
+              mat
+            );
+            topSp.position.y = 0.04;
+            const botSp = new THREE.Mesh(
+              new THREE.SphereGeometry(0.03, 16, 16),
+              mat
+            );
+            botSp.position.y = -0.04;
+            group.add(cyl, topSp, botSp);
+            cloneObj = group;
+          } else if (obj.type === 'light') {
+            cloneObj = new THREE.PointLight(obj.colorHex || '#ffaa00', obj.intensity || 2.0, 2);
+          } else if (obj.type === 'video') {
+            let videoElem: HTMLVideoElement | null = obj.videoElement || null;
+            let videoUrl = '';
+            if (obj.file) {
+              videoUrl = URL.createObjectURL(obj.file);
+              activeBlobUrlsRef.current.push(videoUrl);
+            } else if (obj.videoElement?.src) {
+              videoUrl = obj.videoElement.src;
+            }
+
+            if (videoUrl) {
+              videoElem = document.createElement('video');
+              videoElem.src = videoUrl;
+              videoElem.crossOrigin = 'anonymous';
+              videoElem.loop = true;
+              videoElem.muted = true;
+              videoElem.playsInline = true;
+              videoElem.setAttribute('playsinline', '');
+              videoElem.setAttribute('webkit-playsinline', '');
+              videoElem.load();
+              videoElem.play().catch(() => {});
+            }
+
+            if (videoElem) {
+              videos.push(videoElem);
+              const texture = new THREE.VideoTexture(videoElem);
+              texture.minFilter = THREE.LinearFilter;
+              texture.magFilter = THREE.LinearFilter;
+              texture.format = THREE.RGBAFormat;
+
+              let mat: THREE.Material;
+              if (obj.chromaKeyEnabled) {
+                mat = createChromaKeyMaterial(texture, obj.chromaKeyColor || '#00ff00');
+              } else {
+                mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
+              }
+
+              const geom = new THREE.PlaneGeometry(0.12, 0.08);
+              cloneObj = new THREE.Mesh(geom, mat);
+              (cloneObj as any)._videoTexture = texture;
+            } else if (obj.threeObject) {
+              cloneObj = obj.threeObject.clone(true);
+            }
+          } else if (obj.type === 'glb') {
+            if (obj.threeObject) {
+              cloneObj = SkeletonUtils.clone(obj.threeObject);
+            } else if (obj.rawGltf?.scene) {
+              cloneObj = SkeletonUtils.clone(obj.rawGltf.scene);
+            }
+
+            if (cloneObj) {
+              cloneObj.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                  child.frustumCulled = false;
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                  if (child.material) {
+                    if (Array.isArray(child.material)) {
+                      child.material.forEach((m) => { m.side = THREE.DoubleSide; });
+                    } else {
+                      child.material.side = THREE.DoubleSide;
+                    }
+                  }
+                }
+              });
+              if (obj.animations && obj.animations.length > 0) {
+                const mixer = new THREE.AnimationMixer(cloneObj);
+                const clipIdx = obj.activeAnimIndex || 0;
+                const clip = obj.animations[clipIdx] || obj.animations[0];
+                mixer.clipAction(clip).play();
+                mixers.push(mixer);
+              }
+            }
+          } else if (obj.threeObject) {
+            cloneObj = obj.threeObject.clone(true);
+          }
+
+          if (cloneObj) {
+            const degToRad = (deg: number) => (deg * Math.PI) / 180;
+            cloneObj.position.set(obj.position[0], obj.position[1], obj.position[2]);
+            cloneObj.rotation.set(
+              degToRad(obj.rotation[0]),
+              degToRad(obj.rotation[1]),
+              degToRad(obj.rotation[2])
+            );
+            cloneObj.scale.set(obj.scale[0], obj.scale[1], obj.scale[2]);
+
+            studioGroup.add(cloneObj);
+          }
+        });
+
+        anchor.onTargetFound = () => {
+          setTargetFound(true);
+          setTrackingStatus('พบภาพ Target แล้ว! ✅');
+          setStatusColor('bg-emerald-500/20 text-emerald-300 border-emerald-500/30 font-bold');
+          videos.forEach((v) => {
+            v.muted = true;
+            v.play().catch((e) => console.log('Video play catch:', e));
+          });
+        };
+
+        anchor.onTargetLost = () => {
+          setTargetFound(false);
+          setTrackingStatus('กำลังส่องหาภาพ Target...');
+          setStatusColor('bg-amber-500/20 text-amber-300 border-amber-500/30');
+          videos.forEach((v) => v.pause());
+        };
+
+        await engine.start();
+
+        // Let MindAR resize video & projection matrix accurately
+        if (typeof engine.resize === 'function') {
+          engine.resize();
+        }
+
+        // Maintain correct z-index layering without overriding video aspect geometry
+        const enforceVideoStyles = () => {
+          const v = container.querySelector('video') as HTMLVideoElement | null;
+          const c = container.querySelector('canvas') as HTMLCanvasElement | null;
+
+          if (v) {
+            v.style.setProperty('position', 'absolute', 'important');
+            v.style.setProperty('z-index', '1', 'important');
+            v.style.setProperty('display', 'block', 'important');
+            v.style.setProperty('opacity', '1', 'important');
+            v.setAttribute('playsinline', '');
+            v.setAttribute('webkit-playsinline', '');
+            v.muted = true;
+            if (v.paused) {
+              v.play().catch(() => {});
+            }
+          }
+
+          if (c) {
+            c.style.setProperty('width', '100%', 'important');
+            c.style.setProperty('height', '100%', 'important');
+            c.style.setProperty('position', 'absolute', 'important');
+            c.style.setProperty('top', '0', 'important');
+            c.style.setProperty('left', '0', 'important');
+            c.style.setProperty('z-index', '2', 'important');
+            c.style.setProperty('pointer-events', 'none', 'important');
+          }
+        };
+
+        enforceVideoStyles();
+        const layoutInterval = setInterval(enforceVideoStyles, 1000);
+        (container as any)._layoutInterval = layoutInterval;
+
+        const handleResize = () => {
+          if (typeof engine.resize === 'function') {
+            engine.resize();
+          }
+          enforceVideoStyles();
+        };
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
+        (container as any)._resizeHandler = handleResize;
+
+        // Render Loop
+        const arClock = new THREE.Clock();
+        renderer.setAnimationLoop(() => {
+          const delta = arClock.getDelta();
+          mixers.forEach((m) => m.update(delta));
+
+          // Rock-solid pose smoothing to completely eliminate camera tracking jitter
+          if (anchor.group.visible) {
+            if (!smoothGroup.visible) {
+              smoothGroup.visible = true;
+              smoothGroup.position.copy(anchor.group.position);
+              smoothGroup.quaternion.copy(anchor.group.quaternion);
+              smoothGroup.scale.copy(anchor.group.scale);
+            } else {
+              // Smooth lerp for position/scale and slerp for orientation
+              smoothGroup.position.lerp(anchor.group.position, 0.15);
+              smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.15);
+              smoothGroup.scale.lerp(anchor.group.scale, 0.15);
+            }
+          } else {
+            smoothGroup.visible = false;
+          }
+
+          smoothGroup.traverse((child) => {
+            if ((child as any)._videoTexture) {
+              (child as any)._videoTexture.needsUpdate = true;
+            }
+          });
+
+          renderer.render(scene, camera);
+        });
+
+        return engine;
       };
 
       try {
-        mindarThree = createEngine(currentFacingMode);
+        mindarThree = await initAndStartEngine(facingMode);
       } catch (err) {
-        console.warn(`Failed to create MindAR engine with ${currentFacingMode}, trying user facing mode:`, err);
-        currentFacingMode = 'user';
-        mindarThree = createEngine(currentFacingMode);
+        console.warn(`Camera start failed with mode ${facingMode}, retrying with user mode:`, err);
+        mindarThree = await initAndStartEngine('user');
       }
 
       mindarThreeRef.current = mindarThree;
-
-      const { renderer, scene, camera } = mindarThree;
-
-      if (renderer) {
-        renderer.setClearColor(0x000000, 0);
-      }
-      scene.background = null;
-
-      // Lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-      scene.add(ambientLight);
-      const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-      dirLight.position.set(1, 2, 2);
-      scene.add(dirLight);
-
-      // Anchor
-      const anchor = mindarThree.addAnchor(0);
-      const mixers: THREE.AnimationMixer[] = [];
-      const videos: HTMLVideoElement[] = [];
-
-      // Attach 3D objects to Anchor group
-      objects.forEach((obj) => {
-        if (!obj.visible) return;
-
-        let cloneObj: THREE.Object3D;
-        if (obj.type === 'glb' && obj.threeObject) {
-          cloneObj = SkeletonUtils.clone(obj.threeObject);
-        } else if (obj.threeObject) {
-          cloneObj = obj.threeObject.clone(true);
-        } else {
-          const geom = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-          const mat = new THREE.MeshStandardMaterial({ color: 0x6366f1 });
-          cloneObj = new THREE.Mesh(geom, mat);
-        }
-
-        const degToRad = (deg: number) => (deg * Math.PI) / 180;
-        cloneObj.position.set(obj.position[0], obj.position[1], obj.position[2]);
-        cloneObj.rotation.set(
-          degToRad(obj.rotation[0]),
-          degToRad(obj.rotation[1]),
-          degToRad(obj.rotation[2])
-        );
-        cloneObj.scale.set(obj.scale[0], obj.scale[1], obj.scale[2]);
-
-        if (obj.type === 'glb' && obj.animations && obj.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(cloneObj);
-          const clipIdx = obj.activeAnimIndex || 0;
-          const clip = obj.animations[clipIdx] || obj.animations[0];
-          mixer.clipAction(clip).play();
-          mixers.push(mixer);
-        }
-
-        if (obj.type === 'video' && obj.videoElement) {
-          videos.push(obj.videoElement);
-        }
-
-        if (cloneObj && cloneObj instanceof THREE.Object3D) {
-          anchor.group.add(cloneObj);
-        }
-      });
-
-      anchor.onTargetFound = () => {
-        setTargetFound(true);
-        setTrackingStatus('พบภาพ Target แล้ว! ✅');
-        setStatusColor('bg-emerald-500/20 text-emerald-300 border-emerald-500/30 font-bold');
-        videos.forEach((v) => v.play().catch(() => {}));
-      };
-
-      anchor.onTargetLost = () => {
-        setTargetFound(false);
-        setTrackingStatus('กำลังส่องหาภาพ Target...');
-        setStatusColor('bg-amber-500/20 text-amber-300 border-amber-500/30');
-        videos.forEach((v) => v.pause());
-      };
-
-      // Start engine with fallback retry if facingMode fails
-      try {
-        await mindarThree.start();
-      } catch (startErr) {
-        console.warn("Camera start failed with environment, clearing container and retrying with user mode:", startErr);
-        try {
-          if (mindarThree) mindarThree.stop();
-        } catch (e) {}
-        container.innerHTML = '';
-
-        mindarThree = createEngine('user');
-        mindarThreeRef.current = mindarThree;
-        await mindarThree.start();
-      }
-
-      // Interval to enforce video playback & full container layout
-      const enforceVideoStyles = () => {
-        const v = container.querySelector('video') as HTMLVideoElement | null;
-        const c = container.querySelector('canvas') as HTMLCanvasElement | null;
-
-        if (v) {
-          v.style.setProperty('width', '100%', 'important');
-          v.style.setProperty('height', '100%', 'important');
-          v.style.setProperty('object-fit', 'cover', 'important');
-          v.style.setProperty('position', 'absolute', 'important');
-          v.style.setProperty('top', '0', 'important');
-          v.style.setProperty('left', '0', 'important');
-          v.style.setProperty('z-index', '1', 'important');
-          v.style.setProperty('display', 'block', 'important');
-          v.style.setProperty('opacity', '1', 'important');
-          v.setAttribute('playsinline', '');
-          v.setAttribute('webkit-playsinline', '');
-          v.muted = true;
-          if (v.paused) {
-            v.play().catch((e) => console.log('Video play catch:', e));
-          }
-        }
-
-        if (c) {
-          c.style.setProperty('width', '100%', 'important');
-          c.style.setProperty('height', '100%', 'important');
-          c.style.setProperty('position', 'absolute', 'important');
-          c.style.setProperty('top', '0', 'important');
-          c.style.setProperty('left', '0', 'important');
-          c.style.setProperty('z-index', '2', 'important');
-          c.style.setProperty('pointer-events', 'none', 'important');
-        }
-      };
-
-      enforceVideoStyles();
-      const layoutInterval = setInterval(enforceVideoStyles, 400);
-      (container as any)._layoutInterval = layoutInterval;
-
-      if (usingUserMarker) {
-        setTrackingStatus('ส่องกล้องไปที่รูป Target ของคุณ...');
-        setStatusColor('bg-sky-500/20 text-sky-300 border-sky-500/30');
-      } else {
-        setTrackingStatus('⚠️ ใช้ภาพตัวอย่าง (อัปโหลด Marker เพื่อส่องรูปจริง)');
-        setStatusColor('bg-amber-500/20 text-amber-300 border-amber-500/30 font-bold');
-      }
-
-      // Render Loop
-      const arClock = new THREE.Clock();
-      renderer.setAnimationLoop(() => {
-        const delta = arClock.getDelta();
-        mixers.forEach((m) => m.update(delta));
-        renderer.render(scene, camera);
-      });
     } catch (err: any) {
       console.error("AR Start Failed:", err);
       let reason = 'ไม่ทราบสาเหตุ';
@@ -292,6 +442,12 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
     if (containerEl && (containerEl as any)._layoutInterval) {
       clearInterval((containerEl as any)._layoutInterval);
       (containerEl as any)._layoutInterval = null;
+    }
+
+    if (containerEl && (containerEl as any)._resizeHandler) {
+      window.removeEventListener('resize', (containerEl as any)._resizeHandler);
+      window.removeEventListener('orientationchange', (containerEl as any)._resizeHandler);
+      (containerEl as any)._resizeHandler = null;
     }
 
     if (mindarThreeRef.current) {

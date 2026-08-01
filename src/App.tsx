@@ -25,6 +25,7 @@ import {
 
 import { compileMarkerTarget } from './utils/compiler';
 import { exportStandalonePackage, saveProjectFile } from './utils/zipHandler';
+import { createChromaKeyMaterial } from './utils/chromaKeyShader';
 
 export default function App() {
   // Sidebar Tab
@@ -160,8 +161,33 @@ export default function App() {
     }
   };
 
-  // Marker Upload
+  // Marker Upload (.jpg, .png, or .mind)
   const handleMarkerUpload = (file: File) => {
+    if (file.name.toLowerCase().endsWith('.mind')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result instanceof ArrayBuffer) {
+          const buffer = e.target.result;
+          setCompiledMindBuffer(buffer);
+          setCompilerStatus('success');
+          setCompilerProgress(100);
+          setCompilerError('');
+
+          const svgData = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200" fill="none"><rect width="300" height="200" fill="#0f172a"/><text x="150" y="90" fill="#38bdf8" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">MindAR Target File (.mind)</text><text x="150" y="120" fill="#94a3b8" font-family="sans-serif" font-size="12" text-anchor="middle">${file.name}</text></svg>`;
+          const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+
+          setMarkerData((prev) => ({
+            ...prev,
+            name: file.name,
+            file: file,
+            previewUrl: svgUrl
+          }));
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
     const url = URL.createObjectURL(file);
     const imgObj = new Image();
     imgObj.crossOrigin = 'anonymous';
@@ -240,7 +266,7 @@ export default function App() {
       url,
       (gltf) => {
         const model = gltf.scene;
-        model.scale.set(0.05, 0.05, 0.05);
+        model.scale.set(1, 1, 1);
 
         let mixer: THREE.AnimationMixer | null = null;
         const animations = gltf.animations || [];
@@ -257,7 +283,7 @@ export default function App() {
           visible: true,
           position: [0, 0, 0],
           rotation: [0, 0, 0],
-          scale: [0.05, 0.05, 0.05],
+          scale: [0.1, 0.1, 0.1],
           colorHex: '#ffffff',
           opacity: 1.0,
           fileName: file.name,
@@ -484,6 +510,97 @@ export default function App() {
         setCompiledMindBuffer(buffer);
         setCompilerStatus('success');
         setCompilerProgress(100);
+      }
+
+      // Load Objects
+      if (Array.isArray(projectData.objects)) {
+        const loadedObjects: ARObjectData[] = [];
+
+        for (const objData of projectData.objects) {
+          const newId = 'loaded_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+          let fileObj: File | undefined = undefined;
+          let threeObj: THREE.Object3D | undefined = undefined;
+          let videoElem: HTMLVideoElement | undefined = undefined;
+          let mixer: THREE.AnimationMixer | undefined = undefined;
+          let animations: THREE.AnimationClip[] | undefined = undefined;
+
+          if (objData.fileName) {
+            const assetZipFile = zip.file(objData.fileName);
+            if (assetZipFile) {
+              const blob = await assetZipFile.async("blob");
+              fileObj = new File([blob], objData.fileName, { type: blob.type });
+            }
+          }
+
+          if (objData.type === 'glb' && fileObj) {
+            const url = URL.createObjectURL(fileObj);
+            const loader = new GLTFLoader();
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.3/');
+            loader.setDRACOLoader(dracoLoader);
+
+            try {
+              const gltf = await loader.loadAsync(url);
+              threeObj = gltf.scene;
+              threeObj.scale.set(1, 1, 1);
+              animations = gltf.animations || [];
+              if (animations.length > 0) {
+                mixer = new THREE.AnimationMixer(threeObj);
+                const clipIdx = objData.activeAnimIndex || 0;
+                mixer.clipAction(animations[clipIdx] || animations[0]).play();
+              }
+            } catch (e) {
+              console.warn("Failed to parse GLB in project load:", e);
+            }
+          } else if (objData.type === 'video' && fileObj) {
+            const url = URL.createObjectURL(fileObj);
+            videoElem = document.createElement('video');
+            videoElem.src = url;
+            videoElem.loop = true;
+            videoElem.muted = true;
+            videoElem.setAttribute('playsinline', '');
+            videoElem.setAttribute('webkit-playsinline', '');
+            videoElem.play().catch(() => {});
+
+            const texture = new THREE.VideoTexture(videoElem);
+            const geom = new THREE.PlaneGeometry(0.12, 0.08);
+            let mat: THREE.Material;
+            if (objData.chromaKeyEnabled) {
+              mat = createChromaKeyMaterial(texture, objData.chromaKeyColor || '#00ff00');
+            } else {
+              mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+            }
+            threeObj = new THREE.Mesh(geom, mat);
+          }
+
+          loadedObjects.push({
+            id: newId,
+            name: objData.name || 'Object',
+            type: objData.type || 'cube',
+            visible: objData.visible ?? true,
+            position: objData.position || [0, 0, 0],
+            rotation: objData.rotation || [0, 0, 0],
+            scale: objData.scale || [1, 1, 1],
+            colorHex: objData.colorHex || '#6366f1',
+            opacity: objData.opacity ?? 1.0,
+            intensity: objData.intensity || 2.0,
+            fileName: objData.fileName || undefined,
+            file: fileObj,
+            threeObject: threeObj,
+            videoElement: videoElem,
+            mixer: mixer,
+            animations: animations,
+            activeAnimIndex: objData.activeAnimIndex || 0,
+            chromaKeyEnabled: objData.chromaKeyEnabled || false,
+            chromaKeyColor: objData.chromaKeyColor || '#00ff00'
+          });
+        }
+
+        setObjects(loadedObjects);
+        if (loadedObjects.length > 0) {
+          setSelectedObjectId(loadedObjects[0].id);
+        }
       }
 
       alert("โหลดโปรเจกต์ .webar สำเร็จสมบูรณ์! ✅");

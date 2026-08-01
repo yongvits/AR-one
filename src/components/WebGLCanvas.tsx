@@ -94,7 +94,7 @@ export const WebGLCanvas: React.FC<WebGLCanvasProps> = ({
 
     // TransformControls
     const transformControls = new TransformControls(camera, renderer.domElement);
-    const transformHelper = transformControls.getHelper ? transformControls.getHelper() : (transformControls as unknown as THREE.Object3D);
+    const transformHelper = typeof (transformControls as any).getHelper === 'function' ? (transformControls as any).getHelper() : (transformControls as unknown as THREE.Object3D);
     scene.add(transformHelper);
     transformControlsRef.current = transformControls;
 
