@@ -118,9 +118,9 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           uiLoading: "no",
           uiScanning: "no",
           filterMinCF: 0.0001,
-          filterBeta: 0.001,
-          warmupTolerance: 5,
-          missTolerance: 15
+          filterBeta: 1.0,
+          warmupTolerance: 3,
+          missTolerance: 10
         });
 
         const { renderer, scene, camera } = engine;
@@ -141,16 +141,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         const mixers: THREE.AnimationMixer[] = [];
         const videos: HTMLVideoElement[] = [];
 
-        // Smooth Group container attached to Scene for rock-solid stability without jittering
-        const smoothGroup = new THREE.Group();
-        smoothGroup.visible = false;
-        scene.add(smoothGroup);
-
-        // Studio Group container inside smoothGroup
+        // Studio Group container inside anchor.group
         // Aligns Studio Viewport coordinates (X=Width, Y=Up from target plane, Z=Height down target)
         // with MindAR Anchor coordinates (X=Width, Y=Up target image, Z=Outward from target face).
         const studioGroup = new THREE.Group();
-        smoothGroup.add(studioGroup);
+        anchor.group.add(studioGroup);
 
         studioGroup.rotation.x = Math.PI / 2;
 
@@ -386,24 +381,8 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           const delta = arClock.getDelta();
           mixers.forEach((m) => m.update(delta));
 
-          // Rock-solid pose smoothing to completely eliminate camera tracking jitter
-          if (anchor.group.visible) {
-            if (!smoothGroup.visible) {
-              smoothGroup.visible = true;
-              smoothGroup.position.copy(anchor.group.position);
-              smoothGroup.quaternion.copy(anchor.group.quaternion);
-              smoothGroup.scale.copy(anchor.group.scale);
-            } else {
-              // Smooth lerp for position/scale and slerp for orientation
-              smoothGroup.position.lerp(anchor.group.position, 0.15);
-              smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.15);
-              smoothGroup.scale.lerp(anchor.group.scale, 0.15);
-            }
-          } else {
-            smoothGroup.visible = false;
-          }
-
-          smoothGroup.traverse((child) => {
+          // Video texture updates
+          anchor.group.traverse((child) => {
             if ((child as any)._videoTexture) {
               (child as any)._videoTexture.needsUpdate = true;
             }
