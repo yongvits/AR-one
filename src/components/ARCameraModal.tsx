@@ -117,10 +117,10 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           facingMode: mode,
           uiLoading: "no",
           uiScanning: "no",
-          filterMinCF: 0.0001,
-          filterBeta: 0.005,
-          warmupTolerance: 3,
-          missTolerance: 8
+          filterMinCF: 0.00001,
+          filterBeta: 0.00005,
+          warmupTolerance: 5,
+          missTolerance: 10
         });
 
         const { renderer, scene, camera } = engine;
@@ -398,10 +398,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
             }
           });
 
-          // Rock-solid tracking matrix interpolation to eliminate camera jittering
+          // Rock-solid dual-stage tracking filter to eliminate camera jittering
           if (anchor.group.visible) {
-            const rawMatrix = anchor.group.matrix;
-            rawMatrix.decompose(targetPos, targetRot, targetScale);
+            targetPos.copy(anchor.group.position);
+            targetRot.copy(anchor.group.quaternion);
+            targetScale.copy(anchor.group.scale);
 
             if (!isTracked) {
               currentPos.copy(targetPos);
@@ -409,12 +410,23 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
               currentScale.copy(targetScale);
               isTracked = true;
             } else {
-              currentPos.lerp(targetPos, 0.22);
-              currentRot.slerp(targetRot, 0.22);
-              currentScale.lerp(targetScale, 0.22);
+              const posDist = currentPos.distanceTo(targetPos);
+              const rotAngle = currentRot.angleTo(targetRot);
+
+              // Deadzone filter for micro jittering
+              let alpha = 0.12;
+              if (posDist < 0.005 && rotAngle < 0.03) {
+                alpha = 0.03; // Dead-still lock when holding camera stationary
+              }
+
+              currentPos.lerp(targetPos, alpha);
+              currentRot.slerp(targetRot, alpha);
+              currentScale.lerp(targetScale, alpha);
             }
 
-            anchor.group.matrix.compose(currentPos, currentRot, currentScale);
+            anchor.group.position.copy(currentPos);
+            anchor.group.quaternion.copy(currentRot);
+            anchor.group.scale.copy(currentScale);
           } else {
             isTracked = false;
           }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { ARObjectData, GizmoMode, MarkerData, SequenceData } from '../types/webar';
+import { createChromaKeyMaterial } from '../utils/chromaKeyShader';
 
 interface WebGLCanvasProps {
   markerData: MarkerData;
@@ -145,6 +146,20 @@ export const WebGLCanvas: React.FC<WebGLCanvasProps> = ({
 
       const delta = clockRef.current.getDelta();
       mixersRef.current.forEach((mixer) => mixer.update(delta));
+
+      // Handle Video Textures in Studio Viewport
+      threeObjectsMapRef.current.forEach((threeObj) => {
+        if (threeObj.userData?.type === 'video') {
+          threeObj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as any;
+              if (mat.map && mat.map.isVideoTexture) {
+                mat.map.needsUpdate = true;
+              }
+            }
+          });
+        }
+      });
 
       // Handle Sequence Textures
       if (sequenceData.textures.length > 0 && sequenceData.autoPlay) {
@@ -331,6 +346,51 @@ export const WebGLCanvas: React.FC<WebGLCanvasProps> = ({
           const helper = new THREE.PointLightHelper(light, 0.02);
           light.add(helper);
           threeObj = light;
+        } else if (objData.type === 'video') {
+          let videoElem: HTMLVideoElement | null = objData.videoElement || null;
+          if (!videoElem && (objData.file || objData.fileName)) {
+            videoElem = document.createElement('video');
+            if (objData.file) {
+              videoElem.src = URL.createObjectURL(objData.file);
+            }
+            videoElem.loop = true;
+            videoElem.muted = true;
+            videoElem.setAttribute('playsinline', '');
+            videoElem.setAttribute('webkit-playsinline', '');
+            videoElem.play().catch(() => {});
+          }
+
+          if (videoElem) {
+            const texture = new THREE.VideoTexture(videoElem);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+
+            let mat: THREE.Material;
+            if (objData.chromaKeyEnabled) {
+              mat = createChromaKeyMaterial(texture, objData.chromaKeyColor || '#00ff00');
+            } else {
+              mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
+            }
+
+            let aspect = 1.5;
+            if (videoElem.videoWidth && videoElem.videoHeight) {
+              aspect = videoElem.videoWidth / videoElem.videoHeight;
+            }
+            const geom = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
+            threeObj = new THREE.Mesh(geom, mat);
+
+            videoElem.onloadedmetadata = () => {
+              if (videoElem && videoElem.videoWidth && videoElem.videoHeight) {
+                const actualAspect = videoElem.videoWidth / videoElem.videoHeight;
+                if (threeObj instanceof THREE.Mesh) {
+                  threeObj.geometry.dispose();
+                  threeObj.geometry = new THREE.PlaneGeometry(0.12, 0.12 / actualAspect);
+                }
+              }
+            };
+          } else if (objData.threeObject) {
+            threeObj = objData.threeObject;
+          }
         } else if (objData.threeObject) {
           threeObj = objData.threeObject;
         } else {

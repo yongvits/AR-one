@@ -315,12 +315,23 @@ export default function App() {
     video.muted = true;
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
-    video.play();
+    video.play().catch(() => {});
 
     const texture = new THREE.VideoTexture(video);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+
     const geom = new THREE.PlaneGeometry(0.12, 0.08);
-    const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+    const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
     const mesh = new THREE.Mesh(geom, mat);
+
+    video.onloadedmetadata = () => {
+      if (video.videoWidth && video.videoHeight) {
+        const aspect = video.videoWidth / video.videoHeight;
+        mesh.geometry.dispose();
+        mesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
+      }
+    };
 
     const newId = 'video_' + Date.now();
     const newObj: ARObjectData = {
@@ -564,14 +575,27 @@ export default function App() {
             videoElem.play().catch(() => {});
 
             const texture = new THREE.VideoTexture(videoElem);
-            const geom = new THREE.PlaneGeometry(0.12, 0.08);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+
             let mat: THREE.Material;
             if (objData.chromaKeyEnabled) {
               mat = createChromaKeyMaterial(texture, objData.chromaKeyColor || '#00ff00');
             } else {
-              mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+              mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
             }
+
+            const geom = new THREE.PlaneGeometry(0.12, 0.08);
             threeObj = new THREE.Mesh(geom, mat);
+
+            const vMesh = threeObj as THREE.Mesh;
+            videoElem.onloadedmetadata = () => {
+              if (videoElem && videoElem.videoWidth && videoElem.videoHeight) {
+                const aspect = videoElem.videoWidth / videoElem.videoHeight;
+                vMesh.geometry.dispose();
+                vMesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
+              }
+            };
           }
 
           loadedObjects.push({

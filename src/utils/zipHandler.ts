@@ -9,6 +9,15 @@ export async function saveProjectFile(
 ): Promise<Blob> {
   const zip = new JSZip();
 
+  // Ensure all objects have valid filenames for saving
+  const processedObjects = objects.map(obj => {
+    let fileName = obj.fileName;
+    if (!fileName && (obj.type === 'glb' || obj.type === 'video')) {
+      fileName = `${obj.name.replace(/[^a-zA-Z0-9_.-]/g, '_')}_${obj.id}.${obj.type === 'video' ? 'mp4' : 'glb'}`;
+    }
+    return { ...obj, fileName };
+  });
+
   const projectData: ProjectJSON = {
     version: "5.5.1",
     timestamp: new Date().toISOString(),
@@ -17,7 +26,7 @@ export async function saveProjectFile(
       widthCm: markerData.widthCm,
       heightCm: markerData.heightCm
     },
-    objects: objects.map(obj => ({
+    objects: processedObjects.map(obj => ({
       name: obj.name,
       type: obj.type,
       fileName: obj.fileName || null,
@@ -44,11 +53,22 @@ export async function saveProjectFile(
     zip.file(markerData.name, markerData.file);
   }
 
-  objects.forEach(obj => {
-    if ((obj.type === 'glb' || obj.type === 'video') && obj.file && obj.fileName) {
-      zip.file(obj.fileName, obj.file);
+  // Save GLB models and videos reliably
+  for (const obj of processedObjects) {
+    if ((obj.type === 'glb' || obj.type === 'video') && obj.fileName) {
+      if (obj.file) {
+        zip.file(obj.fileName, obj.file);
+      } else if (obj.videoElement?.src) {
+        try {
+          const res = await fetch(obj.videoElement.src);
+          const blob = await res.blob();
+          zip.file(obj.fileName, blob);
+        } catch (e) {
+          console.warn("Could not fetch video blob for save:", e);
+        }
+      }
     }
-  });
+  }
 
   if (sequenceData.files.length > 0) {
     const seqFolder = zip.folder("effect");
@@ -312,11 +332,22 @@ export async function exportStandalonePackage(
       assetsFolder.file(markerData.name, markerData.file);
     }
 
-    objects.forEach(obj => {
-      if ((obj.type === 'glb' || obj.type === 'video') && obj.file && obj.fileName) {
-        assetsFolder.file(obj.fileName, obj.file);
+    for (const obj of objects) {
+      const fileName = obj.fileName || `${obj.name.replace(/[^a-zA-Z0-9_.-]/g, '_')}_${obj.id}.${obj.type === 'video' ? 'mp4' : 'glb'}`;
+      if ((obj.type === 'glb' || obj.type === 'video') && fileName) {
+        if (obj.file) {
+          assetsFolder.file(fileName, obj.file);
+        } else if (obj.videoElement?.src) {
+          try {
+            const res = await fetch(obj.videoElement.src);
+            const blob = await res.blob();
+            assetsFolder.file(fileName, blob);
+          } catch (e) {
+            console.warn("Could not fetch video blob for export package:", e);
+          }
+        }
       }
-    });
+    }
 
     if (sequenceData.files.length > 0) {
       const effectFolder = assetsFolder.folder("effect");
