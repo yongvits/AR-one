@@ -118,9 +118,9 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           uiLoading: "no",
           uiScanning: "no",
           filterMinCF: 0.0001,
-          filterBeta: 1.0,
+          filterBeta: 0.005,
           warmupTolerance: 3,
-          missTolerance: 10
+          missTolerance: 8
         });
 
         const { renderer, scene, camera } = engine;
@@ -377,6 +377,16 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
         // Render Loop
         const arClock = new THREE.Clock();
+        const targetPos = new THREE.Vector3();
+        const targetRot = new THREE.Quaternion();
+        const targetScale = new THREE.Vector3();
+
+        const currentPos = new THREE.Vector3();
+        const currentRot = new THREE.Quaternion();
+        const currentScale = new THREE.Vector3();
+
+        let isTracked = false;
+
         renderer.setAnimationLoop(() => {
           const delta = arClock.getDelta();
           mixers.forEach((m) => m.update(delta));
@@ -387,6 +397,27 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
               (child as any)._videoTexture.needsUpdate = true;
             }
           });
+
+          // Rock-solid tracking matrix interpolation to eliminate camera jittering
+          if (anchor.group.visible) {
+            const rawMatrix = anchor.group.matrix;
+            rawMatrix.decompose(targetPos, targetRot, targetScale);
+
+            if (!isTracked) {
+              currentPos.copy(targetPos);
+              currentRot.copy(targetRot);
+              currentScale.copy(targetScale);
+              isTracked = true;
+            } else {
+              currentPos.lerp(targetPos, 0.22);
+              currentRot.slerp(targetRot, 0.22);
+              currentScale.lerp(targetScale, 0.22);
+            }
+
+            anchor.group.matrix.compose(currentPos, currentRot, currentScale);
+          } else {
+            isTracked = false;
+          }
 
           renderer.render(scene, camera);
         });
