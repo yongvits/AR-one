@@ -153,7 +153,7 @@ export async function exportStandalonePackage(
   </style>
 </head>
 <body>
-  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.9.0)</div>
+  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v6.0.0)</div>
   <script src="main.js"></script>
 </body>
 </html>`;
@@ -192,9 +192,9 @@ export async function exportStandalonePackage(
     uiLoading: "no",
     uiScanning: "no",
     filterMinCF: 0.0001,
-    filterBeta: 1000,
+    filterBeta: 0.001,
     warmupTolerance: 5,
-    missTolerance: 10
+    missTolerance: 5
   });
 
   const { renderer, scene, camera } = mindarThree;
@@ -209,10 +209,14 @@ export async function exportStandalonePackage(
   const mixers = [];
   const videosToControl = [];
 
-  // Studio Group container inside anchor.group
+  // Rock-Solid Pose Stabilizer Group (Onirix / WebXR Grade Deadzone & Lerp)
+  const smoothGroup = new THREE.Group();
+  scene.add(smoothGroup);
+
+  // Studio Group container inside smoothGroup
   // Aligns Studio Viewport coordinates with MindAR Anchor coordinates.
   const studioGroup = new THREE.Group();
-  anchor.group.add(studioGroup);
+  smoothGroup.add(studioGroup);
 
   studioGroup.rotation.x = Math.PI / 2;
 
@@ -351,15 +355,24 @@ export async function exportStandalonePackage(
     }
   }
 
+  let isTracked = false;
+
+  const POS_DEADZONE = 0.003;
+  const ROT_DEADZONE = 0.008;
+  const SNAP_THRESHOLD = 0.25;
+
   anchor.onTargetFound = () => {
+    isTracked = false;
     overlay.style.background = "rgba(16, 185, 129, 0.9)";
-    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR (v5.9.0)";
+    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR (v6.1.0)";
     videosToControl.forEach(v => v.play().catch(() => {}));
   };
 
   anchor.onTargetLost = () => {
+    isTracked = false;
+    smoothGroup.visible = false;
     overlay.style.background = "rgba(15, 23, 42, 0.85)";
-    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.9.0)";
+    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v6.1.0)";
     videosToControl.forEach(v => v.pause());
   };
 
@@ -369,6 +382,37 @@ export async function exportStandalonePackage(
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
+
+    if (anchor.group.visible) {
+      smoothGroup.visible = true;
+      if (!isTracked) {
+        smoothGroup.position.copy(anchor.group.position);
+        smoothGroup.quaternion.copy(anchor.group.quaternion);
+        smoothGroup.scale.copy(anchor.group.scale);
+        isTracked = true;
+      } else {
+        const posDist = smoothGroup.position.distanceTo(anchor.group.position);
+        const rotDist = smoothGroup.quaternion.angleTo(anchor.group.quaternion);
+
+        if (posDist > SNAP_THRESHOLD) {
+          smoothGroup.position.copy(anchor.group.position);
+          smoothGroup.quaternion.copy(anchor.group.quaternion);
+          smoothGroup.scale.copy(anchor.group.scale);
+        } else {
+          if (posDist > POS_DEADZONE) {
+            smoothGroup.position.lerp(anchor.group.position, 0.25);
+          }
+          if (rotDist > ROT_DEADZONE) {
+            smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.25);
+          }
+          smoothGroup.scale.lerp(anchor.group.scale, 0.25);
+        }
+      }
+    } else {
+      smoothGroup.visible = false;
+      isTracked = false;
+    }
+
     renderer.render(scene, camera);
   });
 });`;
