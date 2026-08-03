@@ -192,9 +192,9 @@ export async function exportStandalonePackage(
     uiLoading: "no",
     uiScanning: "no",
     filterMinCF: 0.0001,
-    filterBeta: 1000,
-    warmupTolerance: 3,
-    missTolerance: 5
+    filterBeta: 0.001,
+    warmupTolerance: 5,
+    missTolerance: 10
   });
 
   const { renderer, scene, camera } = mindarThree;
@@ -208,6 +208,21 @@ export async function exportStandalonePackage(
   const anchor = mindarThree.addAnchor(0);
   const mixers = [];
   const videosToControl = [];
+
+  // Smooth Group lerps world transform to eliminate camera micro-jitter
+  const smoothGroup = new THREE.Group();
+  scene.add(smoothGroup);
+
+  // Studio Group container inside smoothGroup
+  // Aligns Studio Viewport coordinates with MindAR Anchor coordinates.
+  const studioGroup = new THREE.Group();
+  smoothGroup.add(studioGroup);
+
+  studioGroup.rotation.x = Math.PI / 2;
+
+  const targetWidthMeters = (sceneConfig.marker?.widthCm || 15) / 100;
+  const scaleFactor = 1 / targetWidthMeters;
+  studioGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
   function createChromaKeyMat(texture, keyColorHex = '#00ff00') {
     const col = new THREE.Color(keyColorHex);
@@ -335,18 +350,22 @@ export async function exportStandalonePackage(
           degToRad(objData.rotation[2])
         );
         object3D.scale.set(...objData.scale);
-        anchor.group.add(object3D);
+        studioGroup.add(object3D);
       }
     }
   }
 
+  let isTracked = false;
+
   anchor.onTargetFound = () => {
+    isTracked = false;
     overlay.style.background = "rgba(16, 185, 129, 0.9)";
     overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR";
     videosToControl.forEach(v => v.play().catch(() => {}));
   };
 
   anchor.onTargetLost = () => {
+    isTracked = false;
     overlay.style.background = "rgba(15, 23, 42, 0.85)";
     overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR";
     videosToControl.forEach(v => v.pause());
@@ -358,6 +377,24 @@ export async function exportStandalonePackage(
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
+
+    if (anchor.group.visible) {
+      smoothGroup.visible = true;
+      if (!isTracked) {
+        smoothGroup.position.copy(anchor.group.position);
+        smoothGroup.quaternion.copy(anchor.group.quaternion);
+        smoothGroup.scale.copy(anchor.group.scale);
+        isTracked = true;
+      } else {
+        smoothGroup.position.lerp(anchor.group.position, 0.25);
+        smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.25);
+        smoothGroup.scale.lerp(anchor.group.scale, 0.25);
+      }
+    } else {
+      smoothGroup.visible = false;
+      isTracked = false;
+    }
+
     renderer.render(scene, camera);
   });
 });`;

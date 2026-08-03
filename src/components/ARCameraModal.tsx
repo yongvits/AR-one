@@ -118,9 +118,9 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           uiLoading: "no",
           uiScanning: "no",
           filterMinCF: 0.0001,
-          filterBeta: 1000,
-          warmupTolerance: 3,
-          missTolerance: 5
+          filterBeta: 0.001,
+          warmupTolerance: 5,
+          missTolerance: 10
         });
 
         const { renderer, scene, camera } = engine;
@@ -141,11 +141,15 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         const mixers: THREE.AnimationMixer[] = [];
         const videos: HTMLVideoElement[] = [];
 
-        // Studio Group container inside anchor.group
+        // Smooth Group lerps world transform to eliminate camera micro-jitter
+        const smoothGroup = new THREE.Group();
+        scene.add(smoothGroup);
+
+        // Studio Group container inside smoothGroup
         // Aligns Studio Viewport coordinates (X=Width, Y=Up from target plane, Z=Height down target)
-        // with MindAR Anchor coordinates (X=Width, Y=Up target image, Z=Outward from target face).
+        // with MindAR Anchor coordinates.
         const studioGroup = new THREE.Group();
-        anchor.group.add(studioGroup);
+        smoothGroup.add(studioGroup);
 
         studioGroup.rotation.x = Math.PI / 2;
 
@@ -397,26 +401,45 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
         // Render Loop
         const arClock = new THREE.Clock();
-        const targetPos = new THREE.Vector3();
-        const targetRot = new THREE.Quaternion();
-        const targetScale = new THREE.Vector3();
-
-        const currentPos = new THREE.Vector3();
-        const currentRot = new THREE.Quaternion();
-        const currentScale = new THREE.Vector3();
-
         let isTracked = false;
+
+        anchor.onTargetFound = () => {
+          isTracked = false;
+          videos.forEach((v) => v.play().catch(() => {}));
+        };
+
+        anchor.onTargetLost = () => {
+          isTracked = false;
+          videos.forEach((v) => v.pause());
+        };
 
         renderer.setAnimationLoop(() => {
           const delta = arClock.getDelta();
           mixers.forEach((m) => m.update(delta));
 
           // Video texture updates
-          anchor.group.traverse((child) => {
+          smoothGroup.traverse((child) => {
             if ((child as any)._videoTexture) {
               (child as any)._videoTexture.needsUpdate = true;
             }
           });
+
+          if (anchor.group.visible) {
+            smoothGroup.visible = true;
+            if (!isTracked) {
+              smoothGroup.position.copy(anchor.group.position);
+              smoothGroup.quaternion.copy(anchor.group.quaternion);
+              smoothGroup.scale.copy(anchor.group.scale);
+              isTracked = true;
+            } else {
+              smoothGroup.position.lerp(anchor.group.position, 0.25);
+              smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.25);
+              smoothGroup.scale.lerp(anchor.group.scale, 0.25);
+            }
+          } else {
+            smoothGroup.visible = false;
+            isTracked = false;
+          }
 
           renderer.render(scene, camera);
         });
