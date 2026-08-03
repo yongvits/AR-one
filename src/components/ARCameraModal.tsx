@@ -117,10 +117,10 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           facingMode: mode,
           uiLoading: "no",
           uiScanning: "no",
-          filterMinCF: 0.00001,
-          filterBeta: 0.00005,
-          warmupTolerance: 5,
-          missTolerance: 10
+          filterMinCF: 0.0001,
+          filterBeta: 1000,
+          warmupTolerance: 3,
+          missTolerance: 5
         });
 
         const { renderer, scene, camera } = engine;
@@ -254,9 +254,29 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
                 mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
               }
 
-              const geom = new THREE.PlaneGeometry(0.12, 0.08);
+              let aspect = 1.5;
+              if (videoElem.videoWidth && videoElem.videoHeight) {
+                aspect = videoElem.videoWidth / videoElem.videoHeight;
+              }
+              const geom = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
               cloneObj = new THREE.Mesh(geom, mat);
               (cloneObj as any)._videoTexture = texture;
+
+              const vMesh = cloneObj as THREE.Mesh;
+              const updateAspect = () => {
+                if (videoElem && videoElem.videoWidth && videoElem.videoHeight) {
+                  const realAspect = videoElem.videoWidth / videoElem.videoHeight;
+                  vMesh.geometry.dispose();
+                  vMesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / realAspect);
+                }
+              };
+
+              if (videoElem.readyState >= 1) {
+                updateAspect();
+              } else {
+                videoElem.onloadedmetadata = updateAspect;
+                videoElem.onloadeddata = updateAspect;
+              }
             } else if (obj.threeObject) {
               cloneObj = obj.threeObject.clone(true);
             }
@@ -397,39 +417,6 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
               (child as any)._videoTexture.needsUpdate = true;
             }
           });
-
-          // Rock-solid dual-stage tracking filter to eliminate camera jittering
-          if (anchor.group.visible) {
-            targetPos.copy(anchor.group.position);
-            targetRot.copy(anchor.group.quaternion);
-            targetScale.copy(anchor.group.scale);
-
-            if (!isTracked) {
-              currentPos.copy(targetPos);
-              currentRot.copy(targetRot);
-              currentScale.copy(targetScale);
-              isTracked = true;
-            } else {
-              const posDist = currentPos.distanceTo(targetPos);
-              const rotAngle = currentRot.angleTo(targetRot);
-
-              // Deadzone filter for micro jittering
-              let alpha = 0.12;
-              if (posDist < 0.005 && rotAngle < 0.03) {
-                alpha = 0.03; // Dead-still lock when holding camera stationary
-              }
-
-              currentPos.lerp(targetPos, alpha);
-              currentRot.slerp(targetRot, alpha);
-              currentScale.lerp(targetScale, alpha);
-            }
-
-            anchor.group.position.copy(currentPos);
-            anchor.group.quaternion.copy(currentRot);
-            anchor.group.scale.copy(currentScale);
-          } else {
-            isTracked = false;
-          }
 
           renderer.render(scene, camera);
         });

@@ -191,10 +191,10 @@ export async function exportStandalonePackage(
     imageTargetSrc: targetSrc,
     uiLoading: "no",
     uiScanning: "no",
-    filterMinCF: 0.00001,
-    filterBeta: 0.00005,
-    warmupTolerance: 5,
-    missTolerance: 10
+    filterMinCF: 0.0001,
+    filterBeta: 1000,
+    warmupTolerance: 3,
+    missTolerance: 5
   });
 
   const { renderer, scene, camera } = mindarThree;
@@ -301,17 +301,28 @@ export async function exportStandalonePackage(
           mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
         }
 
-        const geom = new THREE.PlaneGeometry(0.12, 0.08);
+        let aspect = 1.5;
+        if (video.videoWidth && video.videoHeight) {
+          aspect = video.videoWidth / video.videoHeight;
+        }
+        const geom = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
         object3D = new THREE.Mesh(geom, mat);
 
         const vMesh = object3D;
-        video.onloadedmetadata = () => {
+        const updateAspect = () => {
           if (video.videoWidth && video.videoHeight) {
-            const aspect = video.videoWidth / video.videoHeight;
+            const realAspect = video.videoWidth / video.videoHeight;
             vMesh.geometry.dispose();
-            vMesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
+            vMesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / realAspect);
           }
         };
+
+        if (video.readyState >= 1) {
+          updateAspect();
+        } else {
+          video.onloadedmetadata = updateAspect;
+          video.onloadeddata = updateAspect;
+        }
 
         videosToControl.push(video);
       }
@@ -343,48 +354,10 @@ export async function exportStandalonePackage(
 
   await mindarThree.start();
 
-  const targetPos = new THREE.Vector3();
-  const targetRot = new THREE.Quaternion();
-  const targetScale = new THREE.Vector3();
-  const currentPos = new THREE.Vector3();
-  const currentRot = new THREE.Quaternion();
-  const currentScale = new THREE.Vector3();
-  let isTracked = false;
-
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
-
-    if (anchor.group.visible) {
-      targetPos.copy(anchor.group.position);
-      targetRot.copy(anchor.group.quaternion);
-      targetScale.copy(anchor.group.scale);
-
-      if (!isTracked) {
-        currentPos.copy(targetPos);
-        currentRot.copy(targetRot);
-        currentScale.copy(targetScale);
-        isTracked = true;
-      } else {
-        const posDist = currentPos.distanceTo(targetPos);
-        const rotAngle = currentRot.angleTo(targetRot);
-        let alpha = 0.12;
-        if (posDist < 0.005 && rotAngle < 0.03) {
-          alpha = 0.03;
-        }
-        currentPos.lerp(targetPos, alpha);
-        currentRot.slerp(targetRot, alpha);
-        currentScale.lerp(targetScale, alpha);
-      }
-
-      anchor.group.position.copy(currentPos);
-      anchor.group.quaternion.copy(currentRot);
-      anchor.group.scale.copy(currentScale);
-    } else {
-      isTracked = false;
-    }
-
     renderer.render(scene, camera);
   });
 });`;
