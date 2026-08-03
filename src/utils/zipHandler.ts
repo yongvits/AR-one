@@ -190,7 +190,11 @@ export async function exportStandalonePackage(
     container: document.body,
     imageTargetSrc: targetSrc,
     uiLoading: "no",
-    uiScanning: "no"
+    uiScanning: "no",
+    filterMinCF: 0.00001,
+    filterBeta: 0.00005,
+    warmupTolerance: 5,
+    missTolerance: 10
   });
 
   const { renderer, scene, camera } = mindarThree;
@@ -204,6 +208,24 @@ export async function exportStandalonePackage(
   const anchor = mindarThree.addAnchor(0);
   const mixers = [];
   const videosToControl = [];
+
+  function createChromaKeyMat(texture, keyColorHex = '#00ff00') {
+    const col = new THREE.Color(keyColorHex);
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTexture: { value: texture },
+        uKeyColor: { value: new THREE.Vector3(col.r, col.g, col.b) },
+        uSimilarity: { value: 0.4 },
+        uSmoothness: { value: 0.1 },
+        uOpacity: { value: 1.0 }
+      },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform sampler2D uTexture; uniform vec3 uKeyColor; uniform float uSimilarity; uniform float uSmoothness; uniform float uOpacity; varying vec2 vUv; void main() { vec4 texColor = texture2D(uTexture, vUv); float dist = distance(texColor.rgb, uKeyColor); float alpha = smoothstep(uSimilarity, uSimilarity + uSmoothness, dist); gl_FragColor = vec4(texColor.rgb, texColor.a * alpha * uOpacity); }',
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+  }
 
   if (sceneConfig.objects && sceneConfig.objects.length > 0) {
     for (const objData of sceneConfig.objects) {
@@ -266,10 +288,31 @@ export async function exportStandalonePackage(
         video.muted = true;
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
+        video.play().catch(() => {});
+
         const texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+
+        let mat;
+        if (objData.chromaKeyEnabled) {
+          mat = createChromaKeyMat(texture, objData.chromaKeyColor || '#00ff00');
+        } else {
+          mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
+        }
+
         const geom = new THREE.PlaneGeometry(0.12, 0.08);
-        const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
         object3D = new THREE.Mesh(geom, mat);
+
+        const vMesh = object3D;
+        video.onloadedmetadata = () => {
+          if (video.videoWidth && video.videoHeight) {
+            const aspect = video.videoWidth / video.videoHeight;
+            vMesh.geometry.dispose();
+            vMesh.geometry = new THREE.PlaneGeometry(0.12, 0.12 / aspect);
+          }
+        };
+
         videosToControl.push(video);
       }
 
@@ -300,23 +343,48 @@ export async function exportStandalonePackage(
 
   await mindarThree.start();
 
-  const iv = setInterval(() => {
-    const videoElem = document.querySelector('video');
-    if (videoElem) {
-      videoElem.setAttribute('playsinline', '');
-      videoElem.setAttribute('webkit-playsinline', '');
-      videoElem.setAttribute('autoplay', '');
-      videoElem.muted = true;
-      if (videoElem.paused) videoElem.play().catch(() => {});
-    } else {
-      clearInterval(iv);
-    }
-  }, 500);
+  const targetPos = new THREE.Vector3();
+  const targetRot = new THREE.Quaternion();
+  const targetScale = new THREE.Vector3();
+  const currentPos = new THREE.Vector3();
+  const currentRot = new THREE.Quaternion();
+  const currentScale = new THREE.Vector3();
+  let isTracked = false;
 
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
+
+    if (anchor.group.visible) {
+      targetPos.copy(anchor.group.position);
+      targetRot.copy(anchor.group.quaternion);
+      targetScale.copy(anchor.group.scale);
+
+      if (!isTracked) {
+        currentPos.copy(targetPos);
+        currentRot.copy(targetRot);
+        currentScale.copy(targetScale);
+        isTracked = true;
+      } else {
+        const posDist = currentPos.distanceTo(targetPos);
+        const rotAngle = currentRot.angleTo(targetRot);
+        let alpha = 0.12;
+        if (posDist < 0.005 && rotAngle < 0.03) {
+          alpha = 0.03;
+        }
+        currentPos.lerp(targetPos, alpha);
+        currentRot.slerp(targetRot, alpha);
+        currentScale.lerp(targetScale, alpha);
+      }
+
+      anchor.group.position.copy(currentPos);
+      anchor.group.quaternion.copy(currentRot);
+      anchor.group.scale.copy(currentScale);
+    } else {
+      isTracked = false;
+    }
+
     renderer.render(scene, camera);
   });
 });`;
