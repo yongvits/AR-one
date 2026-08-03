@@ -153,7 +153,7 @@ export async function exportStandalonePackage(
   </style>
 </head>
 <body>
-  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR</div>
+  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.8.0)</div>
   <script src="main.js"></script>
 </body>
 </html>`;
@@ -209,14 +209,10 @@ export async function exportStandalonePackage(
   const mixers = [];
   const videosToControl = [];
 
-  // Smooth Group lerps world transform to eliminate camera micro-jitter
-  const smoothGroup = new THREE.Group();
-  scene.add(smoothGroup);
-
-  // Studio Group container inside smoothGroup
+  // Studio Group container inside anchor.group
   // Aligns Studio Viewport coordinates with MindAR Anchor coordinates.
   const studioGroup = new THREE.Group();
-  smoothGroup.add(studioGroup);
+  anchor.group.add(studioGroup);
 
   studioGroup.rotation.x = Math.PI / 2;
 
@@ -355,19 +351,15 @@ export async function exportStandalonePackage(
     }
   }
 
-  let isTracked = false;
-
   anchor.onTargetFound = () => {
-    isTracked = false;
     overlay.style.background = "rgba(16, 185, 129, 0.9)";
-    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR";
+    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR (v5.8.0)";
     videosToControl.forEach(v => v.play().catch(() => {}));
   };
 
   anchor.onTargetLost = () => {
-    isTracked = false;
     overlay.style.background = "rgba(15, 23, 42, 0.85)";
-    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR";
+    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.8.0)";
     videosToControl.forEach(v => v.pause());
   };
 
@@ -377,24 +369,6 @@ export async function exportStandalonePackage(
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
-
-    if (anchor.group.visible) {
-      smoothGroup.visible = true;
-      if (!isTracked) {
-        smoothGroup.position.copy(anchor.group.position);
-        smoothGroup.quaternion.copy(anchor.group.quaternion);
-        smoothGroup.scale.copy(anchor.group.scale);
-        isTracked = true;
-      } else {
-        smoothGroup.position.lerp(anchor.group.position, 0.25);
-        smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.25);
-        smoothGroup.scale.lerp(anchor.group.scale, 0.25);
-      }
-    } else {
-      smoothGroup.visible = false;
-      isTracked = false;
-    }
-
     renderer.render(scene, camera);
   });
 });`;
