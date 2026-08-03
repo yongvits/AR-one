@@ -148,12 +148,12 @@ export async function exportStandalonePackage(
       pointer-events: none;
       transition: all 0.3s ease;
     }
-    video { object-fit: cover !important; position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; z-index: 1 !important; }
-    canvas { position: absolute !important; top: 0 !important; left: 0 !important; z-index: 2 !important; pointer-events: none !important; background: transparent !important; }
+    video { position: absolute !important; z-index: 1 !important; }
+    canvas { position: absolute !important; z-index: 2 !important; pointer-events: none !important; background: transparent !important; }
   </style>
 </head>
 <body>
-  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.8.0)</div>
+  <div id="ar-overlay">📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.9.0)</div>
   <script src="main.js"></script>
 </body>
 </html>`;
@@ -192,7 +192,7 @@ export async function exportStandalonePackage(
     uiLoading: "no",
     uiScanning: "no",
     filterMinCF: 0.0001,
-    filterBeta: 0.001,
+    filterBeta: 1000,
     warmupTolerance: 5,
     missTolerance: 10
   });
@@ -353,13 +353,13 @@ export async function exportStandalonePackage(
 
   anchor.onTargetFound = () => {
     overlay.style.background = "rgba(16, 185, 129, 0.9)";
-    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR (v5.8.0)";
+    overlay.innerHTML = "✨ พบภาพ Target! แสดงวัตถุ AR (v5.9.0)";
     videosToControl.forEach(v => v.play().catch(() => {}));
   };
 
   anchor.onTargetLost = () => {
     overlay.style.background = "rgba(15, 23, 42, 0.85)";
-    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.8.0)";
+    overlay.innerHTML = "📷 ส่องกล้องไปที่รูปภาพ Target เพื่อดู AR (v5.9.0)";
     videosToControl.forEach(v => v.pause());
   };
 

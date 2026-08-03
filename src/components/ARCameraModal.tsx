@@ -118,7 +118,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           uiLoading: "no",
           uiScanning: "no",
           filterMinCF: 0.0001,
-          filterBeta: 0.001,
+          filterBeta: 1000,
           warmupTolerance: 5,
           missTolerance: 10
         });
@@ -371,13 +371,9 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           }
 
           if (c) {
-            c.style.setProperty('width', '100%', 'important');
-            c.style.setProperty('height', '100%', 'important');
-            c.style.setProperty('position', 'absolute', 'important');
-            c.style.setProperty('top', '0', 'important');
-            c.style.setProperty('left', '0', 'important');
             c.style.setProperty('z-index', '2', 'important');
             c.style.setProperty('pointer-events', 'none', 'important');
+            c.style.setProperty('background', 'transparent', 'important');
           }
         };
 
@@ -485,7 +481,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
             <Camera className="w-4 h-4 text-emerald-400" />
             Live WebAR Camera Preview
-            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono">v5.8.0</span>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono">v5.9.0</span>
           </span>
         </div>
 
