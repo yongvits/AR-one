@@ -5,6 +5,7 @@ import { Camera, RefreshCw, X, AlertTriangle } from 'lucide-react';
 import { ARObjectData, MarkerData } from '../types/webar';
 import { ensureMindARLoaded, getMindARThreeClass } from '../utils/compiler';
 import { createChromaKeyMaterial } from '../utils/chromaKeyShader';
+import { CustomWebAREngine } from '../engine/customWebAREngine';
 
 interface ARCameraModalProps {
   isOpen: boolean;
@@ -119,8 +120,8 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           uiScanning: "no",
           filterMinCF: 0.0001,
           filterBeta: 0.001,
-          warmupTolerance: 5,
-          missTolerance: 5
+          warmupTolerance: 3,
+          missTolerance: 15
         });
 
         const { renderer, scene, camera } = engine;
@@ -141,15 +142,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         const mixers: THREE.AnimationMixer[] = [];
         const videos: HTMLVideoElement[] = [];
 
-        // Rock-Solid Pose Stabilizer Group (Onirix / WebXR Grade Deadzone & Lerp)
-        const smoothGroup = new THREE.Group();
-        scene.add(smoothGroup);
-
-        // Studio Group container inside smoothGroup
+        // Studio Group container inside anchor.group
         // Aligns Studio Viewport coordinates (X=Width, Y=Up from target plane, Z=Height down target)
         // with MindAR Anchor coordinates.
         const studioGroup = new THREE.Group();
-        smoothGroup.add(studioGroup);
+        anchor.group.add(studioGroup);
 
         studioGroup.rotation.x = Math.PI / 2;
 
@@ -397,21 +394,12 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
 
         // Render Loop
         const arClock = new THREE.Clock();
-        let isTracked = false;
-
-        // Rock-Solid Pose Deadzone thresholds (Onirix style lock)
-        const POS_DEADZONE = 0.003;  // Ignore micro position jitter (< 3mm)
-        const ROT_DEADZONE = 0.008;  // Ignore micro rotation jitter (< 0.5 deg)
-        const SNAP_THRESHOLD = 0.25; // Snap directly on fast motion/re-tracking
 
         anchor.onTargetFound = () => {
-          isTracked = false;
           videos.forEach((v) => v.play().catch(() => {}));
         };
 
         anchor.onTargetLost = () => {
-          isTracked = false;
-          smoothGroup.visible = false;
           videos.forEach((v) => v.pause());
         };
 
@@ -420,41 +408,11 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           mixers.forEach((m) => m.update(delta));
 
           // Video texture updates
-          smoothGroup.traverse((child) => {
+          anchor.group.traverse((child) => {
             if ((child as any)._videoTexture) {
               (child as any)._videoTexture.needsUpdate = true;
             }
           });
-
-          if (anchor.group.visible) {
-            smoothGroup.visible = true;
-            if (!isTracked) {
-              smoothGroup.position.copy(anchor.group.position);
-              smoothGroup.quaternion.copy(anchor.group.quaternion);
-              smoothGroup.scale.copy(anchor.group.scale);
-              isTracked = true;
-            } else {
-              const posDist = smoothGroup.position.distanceTo(anchor.group.position);
-              const rotDist = smoothGroup.quaternion.angleTo(anchor.group.quaternion);
-
-              if (posDist > SNAP_THRESHOLD) {
-                smoothGroup.position.copy(anchor.group.position);
-                smoothGroup.quaternion.copy(anchor.group.quaternion);
-                smoothGroup.scale.copy(anchor.group.scale);
-              } else {
-                if (posDist > POS_DEADZONE) {
-                  smoothGroup.position.lerp(anchor.group.position, 0.25);
-                }
-                if (rotDist > ROT_DEADZONE) {
-                  smoothGroup.quaternion.slerp(anchor.group.quaternion, 0.25);
-                }
-                smoothGroup.scale.lerp(anchor.group.scale, 0.25);
-              }
-            }
-          } else {
-            smoothGroup.visible = false;
-            isTracked = false;
-          }
 
           renderer.render(scene, camera);
         });
@@ -524,7 +482,7 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
             <Camera className="w-4 h-4 text-emerald-400" />
             Live WebAR Camera Preview
-            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono">v6.0.0</span>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono">v6.4.0 Pro</span>
           </span>
         </div>
 
