@@ -19,9 +19,10 @@ export function getMindARThreeClass() {
 
 export async function getOptimizedImageElement(img: HTMLImageElement): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const maxDim = 800;
-    let w = img.naturalWidth || img.width || 800;
-    let h = img.naturalHeight || img.height || 600;
+    // Increased target compilation resolution from 800px to 1280px for dense feature keypoint extraction
+    const maxDim = 1280;
+    let w = img.naturalWidth || img.width || 1280;
+    let h = img.naturalHeight || img.height || 960;
 
     if (w > maxDim || h > maxDim) {
       if (w > h) {
@@ -42,13 +43,15 @@ export async function getOptimizedImageElement(img: HTMLImageElement): Promise<H
       return;
     }
 
+    // Apply high-contrast sharpening filter pass to enhance pixel edges for FAST keypoint detection
+    ctx.filter = 'contrast(1.22) saturate(1.05) brightness(1.02)';
     ctx.drawImage(img, 0, 0, w, h);
 
     const optImg = new Image();
     optImg.crossOrigin = "anonymous";
     optImg.onload = () => resolve(optImg);
     optImg.onerror = () => reject(new Error("Failed to process optimized marker image"));
-    optImg.src = canvas.toDataURL('image/jpeg', 0.92);
+    optImg.src = canvas.toDataURL('image/jpeg', 0.95);
   });
 }
 

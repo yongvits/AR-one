@@ -118,10 +118,10 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           facingMode: mode,
           uiLoading: "no",
           uiScanning: "no",
-          filterMinCF: 0.001,
-          filterBeta: 10,
+          filterMinCF: 0.0001,
+          filterBeta: 0.001,
           warmupTolerance: 5,
-          missTolerance: 10
+          missTolerance: 15
         });
 
         const { renderer, scene, camera } = engine;
