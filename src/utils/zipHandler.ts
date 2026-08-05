@@ -191,10 +191,10 @@ export async function exportStandalonePackage(
     imageTargetSrc: targetSrc,
     uiLoading: "no",
     uiScanning: "no",
-    filterMinCF: 0.001,
-    filterBeta: 1000,
-    warmupTolerance: 5,
-    missTolerance: 10
+    filterMinCF: 0.0001,
+    filterBeta: 0.001,
+    warmupTolerance: 3,
+    missTolerance: 15
   });
 
   const { renderer, scene, camera } = mindarThree;
@@ -209,10 +209,14 @@ export async function exportStandalonePackage(
   const mixers = [];
   const videosToControl = [];
 
-  // Studio Group container inside anchor.group
+  // Meta Spark AR Style Stabilized Smooth Group
+  const smoothGroup = new THREE.Group();
+  scene.add(smoothGroup);
+
+  // Studio Group container inside smoothGroup
   // Aligns Studio Viewport coordinates with MindAR Anchor coordinates.
   const studioGroup = new THREE.Group();
-  anchor.group.add(studioGroup);
+  smoothGroup.add(studioGroup);
 
   studioGroup.rotation.x = Math.PI / 2;
 
@@ -366,13 +370,68 @@ export async function exportStandalonePackage(
   await mindarThree.start();
 
   const clock = new THREE.Clock();
+  let isInitialized = false;
+  let lostFrames = 0;
+  const MAX_HOLD_FRAMES = 20;
+
+  const lastPosition = new THREE.Vector3();
+  const lastQuaternion = new THREE.Quaternion();
+  const lastScale = new THREE.Vector3(1, 1, 1);
+
+  const POS_DEADZONE = 0.0008;
+  const ROT_DEADZONE = 0.0015;
 
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     mixers.forEach(m => m.update(delta));
 
+    // Meta Spark AR Dual-Stage Pose Stabilization
+    if (anchor.group.visible) {
+      lostFrames = 0;
+      const rawPos = anchor.group.position;
+      const rawRot = anchor.group.quaternion;
+      const rawScale = anchor.group.scale;
+
+      if (!isInitialized) {
+        lastPosition.copy(rawPos);
+        lastQuaternion.copy(rawRot);
+        lastScale.copy(rawScale);
+        isInitialized = true;
+      } else {
+        const posDist = lastPosition.distanceTo(rawPos);
+        const rotDist = lastQuaternion.angleTo(rawRot);
+
+        if (posDist > 0.4) {
+          lastPosition.copy(rawPos);
+          lastQuaternion.copy(rawRot);
+          lastScale.copy(rawScale);
+        } else {
+          if (posDist > POS_DEADZONE) {
+            const alphaPos = Math.min(0.25, Math.max(0.06, posDist * 1.5));
+            lastPosition.lerp(rawPos, alphaPos);
+          }
+          if (rotDist > ROT_DEADZONE) {
+            const alphaRot = Math.min(0.20, Math.max(0.05, rotDist * 1.2));
+            lastQuaternion.slerp(rawRot, alphaRot);
+          }
+          lastScale.lerp(rawScale, 0.15);
+        }
+      }
+
+      smoothGroup.position.copy(lastPosition);
+      smoothGroup.quaternion.copy(lastQuaternion);
+      smoothGroup.scale.copy(lastScale);
+      smoothGroup.visible = true;
+    } else if (isInitialized && lostFrames < MAX_HOLD_FRAMES) {
+      lostFrames++;
+      smoothGroup.visible = true;
+    } else {
+      smoothGroup.visible = false;
+      isInitialized = false;
+    }
+
     // Video texture updates
-    anchor.group.traverse((child) => {
+    smoothGroup.traverse((child) => {
       if ((child as any)._videoTexture) {
         (child as any)._videoTexture.needsUpdate = true;
       }

@@ -118,10 +118,10 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           facingMode: mode,
           uiLoading: "no",
           uiScanning: "no",
-          filterMinCF: 0.001,
-          filterBeta: 1000,
-          warmupTolerance: 5,
-          missTolerance: 10
+          filterMinCF: 0.0001,
+          filterBeta: 0.001,
+          warmupTolerance: 3,
+          missTolerance: 15
         });
 
         const { renderer, scene, camera } = engine;
@@ -142,11 +142,15 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         const mixers: THREE.AnimationMixer[] = [];
         const videos: HTMLVideoElement[] = [];
 
-        // Studio Group container inside anchor.group
+        // Meta Spark AR Style Stabilized Smooth Group
+        const smoothGroup = new THREE.Group();
+        scene.add(smoothGroup);
+
+        // Studio Group container inside smoothGroup
         // Aligns Studio Viewport coordinates (X=Width, Y=Up from target plane, Z=Height down target)
         // with MindAR Anchor coordinates.
         const studioGroup = new THREE.Group();
-        anchor.group.add(studioGroup);
+        smoothGroup.add(studioGroup);
 
         studioGroup.rotation.x = Math.PI / 2;
 
@@ -329,6 +333,20 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
           }
         });
 
+        // Render Loop & Spark AR Pose Stabilizer
+        const arClock = new THREE.Clock();
+        let isInitialized = false;
+        let lostFrames = 0;
+        const MAX_HOLD_FRAMES = 20;
+
+        const lastPosition = new THREE.Vector3();
+        const lastQuaternion = new THREE.Quaternion();
+        const lastScale = new THREE.Vector3(1, 1, 1);
+
+        // Subpixel deadzone thresholds (ignoring micro-shaking when still)
+        const POS_DEADZONE = 0.0008; // 0.8mm deadzone
+        const ROT_DEADZONE = 0.0015; // ~0.08 degree deadzone
+
         anchor.onTargetFound = () => {
           setTargetFound(true);
           setTrackingStatus('พบภาพ Target แล้ว! ✅');
@@ -392,23 +410,59 @@ export const ARCameraModal: React.FC<ARCameraModalProps> = ({
         window.addEventListener('orientationchange', handleResize);
         (container as any)._resizeHandler = handleResize;
 
-        // Render Loop
-        const arClock = new THREE.Clock();
-
-        anchor.onTargetFound = () => {
-          videos.forEach((v) => v.play().catch(() => {}));
-        };
-
-        anchor.onTargetLost = () => {
-          videos.forEach((v) => v.pause());
-        };
-
         renderer.setAnimationLoop(() => {
           const delta = arClock.getDelta();
           mixers.forEach((m) => m.update(delta));
 
+          // Spark AR Dual-Stage Pose Stabilization
+          if (anchor.group.visible) {
+            lostFrames = 0;
+            const rawPos = anchor.group.position;
+            const rawRot = anchor.group.quaternion;
+            const rawScale = anchor.group.scale;
+
+            if (!isInitialized) {
+              lastPosition.copy(rawPos);
+              lastQuaternion.copy(rawRot);
+              lastScale.copy(rawScale);
+              isInitialized = true;
+            } else {
+              const posDist = lastPosition.distanceTo(rawPos);
+              const rotDist = lastQuaternion.angleTo(rawRot);
+
+              if (posDist > 0.4) {
+                // Immediate re-localization snap if moved far
+                lastPosition.copy(rawPos);
+                lastQuaternion.copy(rawRot);
+                lastScale.copy(rawScale);
+              } else {
+                // Ignore micro-shaking below subpixel deadzone
+                if (posDist > POS_DEADZONE) {
+                  const alphaPos = Math.min(0.25, Math.max(0.06, posDist * 1.5));
+                  lastPosition.lerp(rawPos, alphaPos);
+                }
+                if (rotDist > ROT_DEADZONE) {
+                  const alphaRot = Math.min(0.20, Math.max(0.05, rotDist * 1.2));
+                  lastQuaternion.slerp(rawRot, alphaRot);
+                }
+                lastScale.lerp(rawScale, 0.15);
+              }
+            }
+
+            smoothGroup.position.copy(lastPosition);
+            smoothGroup.quaternion.copy(lastQuaternion);
+            smoothGroup.scale.copy(lastScale);
+            smoothGroup.visible = true;
+          } else if (isInitialized && lostFrames < MAX_HOLD_FRAMES) {
+            lostFrames++;
+            smoothGroup.visible = true; // Hold pose during brief frame drops / occlusion
+          } else {
+            smoothGroup.visible = false;
+            isInitialized = false;
+          }
+
           // Video texture updates
-          anchor.group.traverse((child) => {
+          smoothGroup.traverse((child) => {
             if ((child as any)._videoTexture) {
               (child as any)._videoTexture.needsUpdate = true;
             }
