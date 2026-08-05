@@ -191,10 +191,10 @@ export async function exportStandalonePackage(
     imageTargetSrc: targetSrc,
     uiLoading: "no",
     uiScanning: "no",
-    filterMinCF: 0.0001,
-    filterBeta: 0.001,
+    filterMinCF: 0.001,
+    filterBeta: 1000,
     warmupTolerance: 5,
-    missTolerance: 15
+    missTolerance: 10
   });
 
   const { renderer, scene, camera } = mindarThree;
